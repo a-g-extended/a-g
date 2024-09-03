@@ -3031,7 +3031,8 @@ if test "$as_write_fail" -eq 0; then
       ac_delim="${ac_delim}s/@as_write_fail@/0/g
 "
     else
-      ac_delim="${ac_delim}s/@$(a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g"
+      ac_delim="${ac_delim}s/@$(a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g
+s/\\$/\\\\\\$/g"
 $as_write_fail
 $a
 )@/"
@@ -3039,7 +3040,8 @@ $a
         ac_delim="${ac_delim}/g
 "
       else
-        ac_delim="${ac_delim}$(eval as_write_fail="\${$as_write_fail}" && a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g"
+        ac_delim="${ac_delim}$(eval as_write_fail="\${$as_write_fail}" && a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g
+s/\\$/\\\\\\$/g"
 $as_write_fail
 $a
 )/g
@@ -3055,7 +3057,8 @@ else
       ac_delim="${ac_delim}s/@as_write_fail@/1/g
 "
     else
-      ac_delim="${ac_delim}s/@$(a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g"
+      ac_delim="${ac_delim}s/@$(a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g
+s/\\$/\\\\\\$/g"
 $as_write_fail
 $a
 )@/"
@@ -3063,7 +3066,8 @@ $a
         ac_delim="${ac_delim}/g
 "
       else
-        ac_delim="${ac_delim}$(eval as_write_fail="\${$as_write_fail}" && a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g"
+        ac_delim="${ac_delim}$(eval as_write_fail="\${$as_write_fail}" && a=0$(printf "%${#as_write_fail}s" | tr " " 0) && cat <<$a | sed "s/\\//\\\\\\//g
+s/\\$/\\\\\\$/g"
 $as_write_fail
 $a
 )/g
