@@ -1,3 +1,9 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 #include <errno.h>
 #include <dirent.h>
 #include <sys/mman.h>
