@@ -1,19 +1,19 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
 #include <errno.h>
 #include <dirent.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <fcntl.h>
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 #ifndef RUNSHSTR
 #define RUNSHSTR "mkdir build\nmkdir install1\ncd build\n../configure --prefix='$(realpath ../install1)'\nmake\nmake install"
 #endif
