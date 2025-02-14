@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
@@ -22,23 +24,133 @@
 #endif
 
 static inline void
-mkdim (char *dir)
+mkdim (char *dir, char *envp[])
 {
-  const char *commandmkdir = "mkdir \"";
+  const char *cdStr = "cd \"";
+  const size_t cdStrSize = strlen (cdStr);
+  const char *commandmkdir = "\" && test -n \"$(mkdir -p \"";
   const size_t commandmkdirSize = strlen (commandmkdir);
-  const char *commandmkdirAfter = "\" 2>&0 | exit";
+  const char *commandmkdirAfter = "\" 2>&1)\"";
   const size_t commandmkdirAfterSize = strlen (commandmkdirAfter);
   DIR *dirp;
-  size_t dirSize = strlen (dir);
-  size_t commandSize = commandmkdirSize + dirSize + commandmkdirAfterSize + 1;
-  char *command = malloc (commandSize);
-  memcpy (command, commandmkdir, commandmkdirSize);
-  commandSize = commandmkdirSize;
-  memcpy (command + commandSize, dir, dirSize);
-  commandSize += dirSize;
+  size_t dirSize;
+  size_t nExtra;
+  size_t commandSize;
+  char *command;
+  char *shellLocStr;
+  size_t shellLocStrSize;
+  shellLocStr = getenv ("SHELL");
+  shellLocStrSize = strlen (shellLocStr);
+  pid_t spid;
+  char *sargv[4];
+  siginfo_t ssiginfo;
+  if (!dir)
+    {
+      return;
+    }
+  *sargv = shellLocStr;
+  sargv[1] = "-c";
+  sargv[3] = 0;
+  for (dirSize = nExtra = 0; dir[dirSize]; dirSize++)
+    {
+      nExtra += dir[dirSize] == '\'' || dir[dirSize] == '\"'
+	|| dir[dirSize] == '$' || dir[dirSize] == '`' || dir[dirSize] == '\\'
+	|| dir[dirSize] == '|' || dir[dirSize] == '&' || dir[dirSize] == ';'
+	|| dir[dirSize] == '<' || dir[dirSize] == '>';
+    }
+  dirp = opendir (dir);
+  if (dirp)
+    {
+      closedir (dirp);
+      return;
+    }
+  commandSize =
+    cdStrSize + dirSize + commandmkdirSize + commandmkdirAfterSize;
+  command = malloc (commandSize);
+  memcpy (command, cdStr, cdStrSize);
+  commandSize--;
   command[commandSize] = 0;
-  for (dirp = opendir (command + commandmkdirSize); !dirp;
-       dirp = opendir (command + commandmkdirSize))
+  commandSize -= commandmkdirAfterSize;
+  memcpy (command + commandSize, commandmkdirAfter, commandmkdirAfterSize);
+  for (dirSize -= dirSize != 0; dirSize && dir[dirSize] != '/'; dirSize--)
+    {
+      commandSize--;
+      command[commandSize] = dir[dirSize];
+      if (dir[dirSize] == '\'' || dir[dirSize] == '\"' || dir[dirSize] == '$'
+	  || dir[dirSize] == '`' || dir[dirSize] == '\\'
+	  || dir[dirSize] == '|' || dir[dirSize] == '&' || dir[dirSize] == ';'
+	  || dir[dirSize] == '<' || dir[dirSize] == '>')
+	{
+	  commandSize--;
+	  command[commandSize] = '\\';
+	}
+    }
+  commandSize--;
+  command[commandSize] = 0;
+  memcpy (command + commandSize - dirSize, dir, dirSize);
+  dirp = opendir (command + commandSize - dirSize);
+  for (; !dirp; dirp = opendir (command + commandSize - dirSize))
+    {
+      command[commandSize] = '/';
+      for (dirSize -= dirSize != 0; dirSize && dir[dirSize] != '/'; dirSize--)
+	{
+	  commandSize--;
+	  command[commandSize] = dir[dirSize];
+	  if (dir[dirSize] == '\'' || dir[dirSize] == '\"'
+	      || dir[dirSize] == '$' || dir[dirSize] == '`'
+	      || dir[dirSize] == '\\' || dir[dirSize] == '|'
+	      || dir[dirSize] == '&' || dir[dirSize] == ';'
+	      || dir[dirSize] == '<' || dir[dirSize] == '>')
+	    {
+	      commandSize--;
+	      command[commandSize] = '\\';
+	    }
+	}
+      commandSize--;
+      command[commandSize] = 0;
+    }
+  closedir (dirp);
+  commandSize -= commandmkdirSize - 1;
+  memcpy (command + commandSize, commandmkdir, commandmkdirSize);
+  for (; dirSize; dirSize--)
+    {
+      commandSize--;
+      command[commandSize] = dir[dirSize - 1];
+      if (dir[dirSize - 1] == '\'' || dir[dirSize - 1] == '\"'
+	  || dir[dirSize - 1] == '$' || dir[dirSize - 1] == '`'
+	  || dir[dirSize - 1] == '\\' || dir[dirSize - 1] == '|'
+	  || dir[dirSize - 1] == '&' || dir[dirSize - 1] == ';'
+	  || dir[dirSize - 1] == '<' || dir[dirSize - 1] == '>')
+	{
+	  commandSize--;
+	  command[commandSize] = '\\';
+	}
+    }
+  sargv[2] = command;
+  if (sargv[2] && !posix_spawnp (&spid, *sargv, NULL, NULL, sargv, envp))
+    {
+      if (waitid (P_PID, spid, &ssiginfo, WEXITED) != -1)
+	{
+	  if (ssiginfo.si_signo == SIGCHLD && ssiginfo.si_code == CLD_EXITED)
+	    {
+	      free (command);
+	      return;
+	    }
+	}
+    }
+  if (!command)
+    {
+      commandSize = commandmkdirSize + dirSize + commandmkdirAfterSize + 1;
+      command = malloc (commandSize);
+    }
+  *sargv = "mkdir";
+  sargv[1] = 0;
+  sargv[2] = 0;
+  dirSize = strlen (dir);
+  memcpy (command, dir, dirSize);
+  commandSize = dirSize;
+  command[commandSize] = 0;
+  for (dirp = opendir (command); !dirp; dirp = opendir (command))
     {
       for (; commandSize && command[commandSize] != '/'; commandSize--);
       command[commandSize] = 0;
@@ -46,21 +158,17 @@ mkdim (char *dir)
   closedir (dirp);
   command[commandSize] = '/';
   for (;
-       commandSize != commandmkdirSize + dirSize
-       && command[commandSize] == '/'; commandSize++);
-  for (; commandSize != commandmkdirSize + dirSize && command[commandSize];
-       commandSize++);
-  while (commandSize != commandmkdirSize + dirSize)
+       commandSize != dirSize && command[commandSize] == '/'; commandSize++);
+  for (; commandSize != dirSize && command[commandSize]; commandSize++);
+  while (commandSize != dirSize)
     {
-      memcpy (command + commandSize, commandmkdirAfter,
-	      commandmkdirAfterSize);
-      commandSize += commandmkdirAfterSize;
       command[commandSize] = 0;
-      system (command);
-      commandSize -= commandmkdirAfterSize;
-      command[commandSize] = 0;
-      dirp = opendir (command + commandmkdirSize);
-      command[commandSize] = *commandmkdirAfter;
+      sargv[1] = command;
+      if (sargv[1] && !posix_spawnp (&spid, *sargv, NULL, NULL, sargv, envp))
+	{
+	  waitid (P_PID, spid, &ssiginfo, WEXITED);
+	}
+      dirp = opendir (command);
       if (dirp)
 	{
 	  closedir (dirp);
@@ -71,37 +179,28 @@ mkdim (char *dir)
 	       && command[commandmkdirSize + 2] == '?'
 	       && command[commandmkdirSize + 3] == '/')
 	{
-	  memcpy (command + 4, commandmkdir, commandmkdirSize);
-	  system (command + 4);
-	  memcpy (command, commandmkdir, commandmkdirSize);
-	  memcpy (command + commandmkdirSize, "//?/", 4);
+	  sargv[1] = command + 4;
+	  if (command
+	      && !posix_spawnp (&spid, *sargv, NULL, NULL, sargv, envp))
+	    {
+	      waitid (P_PID, spid, &ssiginfo, WEXITED);
+	    }
 	}
-      if (dirSize + commandmkdirSize - commandSize <
-	  commandmkdirAfterSize + 1)
-	{
-	  memcpy (command + commandSize, dir + commandSize - commandmkdirSize,
-		  dirSize + commandmkdirSize - commandSize);
-	}
-      else
-	{
-	  memcpy (command + commandSize, dir + commandSize - commandmkdirSize,
-		  commandmkdirAfterSize + 1);
-	}
+      command[commandSize] = '/';
       for (;
-	   commandSize != commandmkdirSize + dirSize
+	   commandSize != dirSize
 	   && command[commandSize] == '/'; commandSize++);
       for (;
-	   commandSize != commandmkdirSize + dirSize && command[commandSize]
+	   commandSize != dirSize && command[commandSize]
 	   && command[commandSize] != '/'; commandSize++);
     }
-  memcpy (command + commandSize, commandmkdirAfter, commandmkdirAfterSize);
-  commandSize += commandmkdirAfterSize;
   command[commandSize] = 0;
-  system (command);
-  commandSize -= commandmkdirAfterSize;
-  command[commandSize] = 0;
-  dirp = opendir (command + commandmkdirSize);
-  command[commandSize] = *commandmkdirAfter;
+  sargv[1] = command;
+  if (sargv[1] && !posix_spawnp (&spid, *sargv, NULL, NULL, sargv, envp))
+    {
+      waitid (P_PID, spid, &ssiginfo, WEXITED);
+    }
+  dirp = opendir (command);
   if (dirp)
     {
       closedir (dirp);
@@ -112,11 +211,13 @@ mkdim (char *dir)
 	   && command[commandmkdirSize + 2] == '?'
 	   && command[commandmkdirSize + 3] == '/')
     {
-      memcpy (command + 4, commandmkdir, commandmkdirSize);
-      system (command + 4);
-      memcpy (command, commandmkdir, commandmkdirSize);
-      memcpy (command + commandmkdirSize, "//?/", 4);
+      sargv[1] = command + 4;
+      if (command && !posix_spawnp (&spid, *sargv, NULL, NULL, sargv, envp))
+	{
+	  waitid (P_PID, spid, &ssiginfo, WEXITED);
+	}
     }
+  free (command);
 }
 
 static inline bool
@@ -200,7 +301,7 @@ loadSourceList (char **packageFileName, size_t *packageFileNameSize,
 		char **packageFileMemMap, struct stat *st,
 		size_t *numberOfPackageLists, bool *gotonewline, size_t *i,
 		char ***packageList, size_t **packageListNameSizes,
-		size_t *packageListNameSize, bool *execute)
+		size_t *packageListNameSize, bool *execute, char *envp[])
 {
   *packageFileNameSize = strlen ("etc/a-g/sources.list");
   *packageFileName = malloc (*installDirNameSize + *packageFileNameSize);
@@ -211,7 +312,7 @@ loadSourceList (char **packageFileName, size_t *packageFileNameSize,
   (*packageFileName)[*packageFileNameSize] = 0;
   *packageFileNameSize -= strlen ("/sources.list");
   (*packageFileName)[*packageFileNameSize] = 0;
-  mkdim (*packageFileName);
+  mkdim (*packageFileName, envp);
   (*packageFileName)[*packageFileNameSize] = '/';
   *packageFileNameSize += strlen ("/sources.list");
   *packageFile =
@@ -367,6 +468,9 @@ main (int argc, char *argv[], char *envp[])
   size_t r;
   size_t s;
   size_t t;
+  pid_t spid;
+  char *sargv[6];
+  siginfo_t ssiginfo;
   bool gotonewline;
   size_t packageNameSize;
   const char *archivesLoc = "var/cache/a-g/archives/";
@@ -657,7 +761,7 @@ main (int argc, char *argv[], char *envp[])
 			  &packageFileMemMap, &st, &numberOfPackageLists,
 			  &gotonewline, &i, &packageList,
 			  &packageListNameSizes, &packageListNameSize,
-			  &execute);
+			  &execute, envp);
 	  printf ("Done\n");
 	  printf ("Reading state information... ");
 	  printf ("Done\n");
@@ -674,50 +778,73 @@ main (int argc, char *argv[], char *envp[])
 	  printf ("Do you want to continue? [Y/n] ");
 	  if (getchar () != 'n')
 	    {
+	      startCommandStrSizeMax = 1;
+	      startCommandStr = malloc (startCommandStrSizeMax);
+	      *sargv = 0;
+	      sargv[2] = "--no-checkout";
+	      sargv[5] = 0;
 	      for (i = 2; i != argc; i++)
 		{
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
+		  *sargv = 0;
+		  sargv[1] = "clone";
 		  for (j = 0; j != numberOfPackageLists; j++)
 		    {
-		      printf ("Get:1 %s main amd64 %s [0 kB]\n",
-			      packageList[j], argv[i]);
 		      packageNameSize = strlen (argv[i]);
-		      startCommandStrSize =
-			strlen ("git clone --no-checkout ");
-		      startCommandStr =
-			malloc (startCommandStrSize +
-				packageListNameSizes[j] +
-				packageNameSize * 2 + installDirNameSize +
-				archivesLocSize + 1);
-		      memcpy (startCommandStr, "git clone --no-checkout ",
-			      startCommandStrSize);
-		      memcpy (startCommandStr + startCommandStrSize,
-			      packageList[j], packageListNameSizes[j]);
-		      startCommandStr[startCommandStrSize +
-				      packageListNameSizes[j] - 1] = '/';
-		      memcpy (startCommandStr + startCommandStrSize +
+		      startCommandStrSize = packageListNameSizes[j] +
+			packageNameSize * 2 + installDirNameSize +
+			archivesLocSize + 1;
+		      setupDstAppendInternal (&startCommandStr,
+					      &startCommandStrSize,
+					      &startCommandStrSizeMax);
+		      memcpy (startCommandStr, packageList[j],
+			      packageListNameSizes[j]);
+		      startCommandStr[packageListNameSizes[j] - 1] = '/';
+		      memcpy (startCommandStr +
 			      packageListNameSizes[j], argv[i],
 			      packageNameSize);
-		      startCommandStr[startCommandStrSize +
-				      packageListNameSizes[j] +
-				      packageNameSize] = ' ';
-		      memcpy (startCommandStr + startCommandStrSize +
+		      sargv[3] = startCommandStr;
+		      sargv[4] = startCommandStr + packageListNameSizes[j] +
+			packageNameSize;
+		      sargv[4][0] = 0;
+		      sargv[4]++;
+		      memcpy (startCommandStr +
 			      packageListNameSizes[j] + packageNameSize + 1,
 			      installDir, installDirNameSize);
-		      memcpy (startCommandStr + startCommandStrSize +
+		      memcpy (startCommandStr +
 			      packageListNameSizes[j] + packageNameSize +
 			      installDirNameSize, archivesLoc,
 			      archivesLocSize);
-		      memcpy (startCommandStr + startCommandStrSize +
+		      memcpy (startCommandStr +
 			      packageListNameSizes[j] + packageNameSize +
 			      installDirNameSize + archivesLocSize, argv[i],
 			      packageNameSize);
-		      startCommandStrSize +=
-			packageListNameSizes[j] + packageNameSize * 2 +
-			installDirNameSize + archivesLocSize + 1;
 		      startCommandStr[startCommandStrSize - 1] = 0;
-		      if (!system (startCommandStr))
+		      if (*sargv
+			  && waitid (P_PID, spid, &ssiginfo, WEXITED) != -1)
 			{
-			  j = numberOfPackageLists - 1;
+			  if (ssiginfo.si_signo == SIGCHLD
+			      && ssiginfo.si_code == CLD_EXITED
+			      && !ssiginfo.si_status)
+			    {
+			      sargv[1] = 0;
+			      j = numberOfPackageLists - 1;
+			    }
+			}
+		      printf ("Get:1 %s main amd64 %s [0 kB]\n",
+			      packageList[j], argv[i]);
+		      if (sargv[1])
+			{
+			  *sargv = "git";
+			}
+		      if (*sargv
+			  && posix_spawnp (&spid, *sargv, NULL, NULL, sargv,
+					   envp) != 0)
+			{
+			  *sargv = 0;
 			}
 		    }
 		}
@@ -727,36 +854,54 @@ main (int argc, char *argv[], char *envp[])
 	      tmpNewNameStr = malloc (1);
 	      tmpNewNameStrSize = 0;
 	      tmpNewNameStrSizeMax = 1;
+	      *sargv = 0;
+	      sargv[3] = "checkout";
+	      sargv[4] = 0;
+	      if (sargv[1] && numberOfPackageLists)
+		{
+		  waitid (P_PID, spid, &ssiginfo, WEXITED);
+		}
+	      sargv[1] = "-C";
 	      for (i = 2; i != argc; i++)
 		{
+		  packageNameSize = strlen (argv[i]);
+		  startCommandStrSize =
+		    installDirNameSize - 1 + archivesLocSize +
+		    packageNameSize + 1;
+		  setupDstAppendInternal (&startCommandStr,
+					  &startCommandStrSize,
+					  &startCommandStrSizeMax);
+		  sargv[2] = startCommandStr;
+		  memcpy (startCommandStr, installDir, installDirNameSize);
+		  memcpy (startCommandStr +
+			  installDirNameSize - 1, archivesLoc,
+			  archivesLocSize);
+		  memcpy (startCommandStr +
+			  installDirNameSize - 1 + archivesLocSize, argv[i],
+			  packageNameSize);
+		  startCommandStr[startCommandStrSize - 1] = 0;
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
 		  printf ("Selecting previously unselected package %s.\n",
 			  argv[i]);
 		  printf ("Preparing to unpack \"%s\" ...\n", argv[i]);
-		  packageNameSize = strlen (argv[i]);
-		  startCommandStrSize = strlen ("git -C \"");
-		  free (startCommandStr);
-		  startCommandStr =
-		    malloc (startCommandStrSize + installDirNameSize - 1 +
-			    archivesLocSize + packageNameSize +
-			    gitCommandStrSize + 1);
-		  memcpy (startCommandStr, "git -C \"", startCommandStrSize);
-		  memcpy (startCommandStr + startCommandStrSize, installDir,
-			  installDirNameSize);
-		  memcpy (startCommandStr + startCommandStrSize +
-			  installDirNameSize - 1, archivesLoc,
-			  archivesLocSize);
-		  memcpy (startCommandStr + startCommandStrSize +
-			  installDirNameSize - 1 + archivesLocSize, argv[i],
-			  packageNameSize);
-		  memcpy (startCommandStr + startCommandStrSize +
-			  installDirNameSize - 1 + archivesLocSize +
-			  packageNameSize, gitCommandStr, gitCommandStrSize);
-		  startCommandStrSize +=
-		    installDirNameSize - 1 + archivesLocSize +
-		    packageNameSize + gitCommandStrSize + 1;
-		  startCommandStr[startCommandStrSize - 1] = 0;
 		  printf ("Unpacking %s ...\n", argv[i]);
-		  system (startCommandStr);
+		  if (sargv[2])
+		    {
+		      *sargv = "git";
+		    }
+		  if (*sargv
+		      && posix_spawnp (&spid, *sargv, NULL, NULL, sargv,
+				       envp) != 0)
+		    {
+		      *sargv = 0;
+		    }
+		}
+	      if (argc - 2)
+		{
+		  waitid (P_PID, spid, &ssiginfo, WEXITED);
 		}
 	      statusFileMemAllocPos = 0;
 	      selectedLength1 = 0;
@@ -833,31 +978,9 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSize,
 					  &startCommandStrSizeMax);
 		  startCommandStrSize = 0;
-		  startCommandStrSize += shellSpace;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] = '\"';
-		  appendInternal (&startCommandStr, &startCommandStrSize,
-				  &shellLocStr, &shellLocStrSize,
-				  &startCommandStrSizeMax);
-		  startCommandStrSize += shellSpace;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] =
-		    (startCommandStr[startCommandStrSize - 1] &
-		     (shellSpace - 1)) + ('\"' & (0 - shellSpace));
-		  appendInternalSrcConst (&startCommandStr,
-					  &startCommandStrSize,
-					  &shellOptionRunStr,
-					  &shellOptionRunStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStrSize++;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] = '\"';
+		  *sargv = 0;
+		  sargv[1] = "-c";
+		  sargv[3] = 0;
 		  appendInternalSrcConst (&startCommandStr,
 					  &startCommandStrSize, &cdStr,
 					  &cdStrSize,
@@ -1376,13 +1499,22 @@ main (int argc, char *argv[], char *envp[])
 			      setupDstAppendInternal (&startCommandStr,
 						      &startCommandStrSize,
 						      &startCommandStrSizeMax);
-			      startCommandStr[startCommandStrSize - 1] = '\"';
-			      startCommandStrSize++;
-			      setupDstAppendInternal (&startCommandStr,
-						      &startCommandStrSize,
-						      &startCommandStrSizeMax);
 			      startCommandStr[startCommandStrSize - 1] = 0;
-			      system (startCommandStr);
+			      sargv[2] = startCommandStr;
+			      if (*sargv)
+				{
+				  waitid (P_PID, spid, &ssiginfo, WEXITED);
+				}
+			      if (sargv[2])
+				{
+				  *sargv = shellLocStr;
+				}
+			      if (*sargv
+				  && posix_spawnp (&spid, *sargv, NULL, NULL,
+						   sargv, envp) != 0)
+				{
+				  *sargv = 0;
+				}
 			      startCommandStrSize = startCommandStrPos;
 			      execute = true;
 			      gotonewline = false;
@@ -1468,13 +1600,22 @@ main (int argc, char *argv[], char *envp[])
 			  setupDstAppendInternal (&startCommandStr,
 						  &startCommandStrSize,
 						  &startCommandStrSizeMax);
-			  startCommandStr[startCommandStrSize - 1] = '\"';
-			  startCommandStrSize++;
-			  setupDstAppendInternal (&startCommandStr,
-						  &startCommandStrSize,
-						  &startCommandStrSizeMax);
 			  startCommandStr[startCommandStrSize - 1] = 0;
-			  system (startCommandStr);
+			  sargv[2] = startCommandStr;
+			  if (*sargv)
+			    {
+			      waitid (P_PID, spid, &ssiginfo, WEXITED);
+			    }
+			  if (sargv[2])
+			    {
+			      *sargv = shellLocStr;
+			    }
+			  if (*sargv
+			      && posix_spawnp (&spid, *sargv, NULL, NULL,
+					       sargv, envp) != 0)
+			    {
+			      *sargv = 0;
+			    }
 			  startCommandStrSize = startCommandStrPos;
 			  execute = true;
 			  gotonewline = false;
@@ -1501,7 +1642,7 @@ main (int argc, char *argv[], char *envp[])
 			  newNameStrSize -=
 			    runshLocStrSize - runshDirLocStrSize + 1;
 			  newNameStr[newNameStrSize - 1] = 0;
-			  mkdim (newNameStr);
+			  mkdim (newNameStr, envp);
 			  newNameStr[newNameStrSize - 1] =
 			    runshLocStr[runshDirLocStrSize - 1];
 			  newNameStrSize -= runshDirLocStrSize;
@@ -1525,7 +1666,7 @@ main (int argc, char *argv[], char *envp[])
 						      &newNameStrSize,
 						      &newNameStrSizeMax);
 			      newNameStr[newNameStrSize - 1] = 0;
-			      mkdim (newNameStr);
+			      mkdim (newNameStr, envp);
 			      newNameStrSize--;
 			      appendInternalSrcConst (&newNameStr,
 						      &newNameStrSize,
@@ -2234,14 +2375,24 @@ main (int argc, char *argv[], char *envp[])
 							  &startCommandStrSize,
 							  &startCommandStrSizeMax);
 				  startCommandStr[startCommandStrSize - 1] =
-				    '\"';
-				  startCommandStrSize++;
-				  setupDstAppendInternal (&startCommandStr,
-							  &startCommandStrSize,
-							  &startCommandStrSizeMax);
-				  startCommandStr[startCommandStrSize - 1] =
 				    0;
-				  system (startCommandStr);
+				  sargv[2] = startCommandStr;
+				  if (*sargv)
+				    {
+				      waitid (P_PID, spid, &ssiginfo,
+					      WEXITED);
+				    }
+				  if (sargv[2])
+				    {
+				      *sargv = shellLocStr;
+				    }
+				  if (*sargv
+				      && posix_spawnp (&spid, *sargv, NULL,
+						       NULL, sargv,
+						       envp) != 0)
+				    {
+				      *sargv = 0;
+				    }
 				  startCommandStrSize = startCommandStrPos;
 				  execute = true;
 				  gotonewline = false;
@@ -2477,13 +2628,22 @@ main (int argc, char *argv[], char *envp[])
 			      setupDstAppendInternal (&startCommandStr,
 						      &startCommandStrSize,
 						      &startCommandStrSizeMax);
-			      startCommandStr[startCommandStrSize - 1] = '\"';
-			      startCommandStrSize++;
-			      setupDstAppendInternal (&startCommandStr,
-						      &startCommandStrSize,
-						      &startCommandStrSizeMax);
 			      startCommandStr[startCommandStrSize - 1] = 0;
-			      system (startCommandStr);
+			      sargv[2] = startCommandStr;
+			      if (*sargv)
+				{
+				  waitid (P_PID, spid, &ssiginfo, WEXITED);
+				}
+			      if (sargv[2])
+				{
+				  *sargv = shellLocStr;
+				}
+			      if (*sargv
+				  && posix_spawnp (&spid, *sargv, NULL, NULL,
+						   sargv, envp) != 0)
+				{
+				  *sargv = 0;
+				}
 			      startCommandStrSize = startCommandStrPos;
 			      execute = true;
 			      gotonewline = false;
@@ -2491,11 +2651,6 @@ main (int argc, char *argv[], char *envp[])
 			}
 		    }
 		  startCommandStrSize = 0;
-		  appendInternalSrcConst (&startCommandStr,
-					  &startCommandStrSize,
-					  &checkIfSymbolicLinkStr,
-					  &checkIfSymbolicLinkStrSize,
-					  &startCommandStrSizeMax);
 		  installDirNameSize--;
 		  appendInternal (&startCommandStr, &startCommandStrSize,
 				  &installDir, &installDirNameSize,
@@ -2517,7 +2672,7 @@ main (int argc, char *argv[], char *envp[])
 					  &infoLocStrSize,
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize] = 0;
-		  mkdim (startCommandStr + checkIfSymbolicLinkStrSize);
+		  mkdim (startCommandStr, envp);
 		  appendInternal (&startCommandStr, &startCommandStrSize,
 				  &argv[i], &argvSize[i],
 				  &startCommandStrSizeMax);
@@ -2528,8 +2683,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize] = 0;
 		  newListFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR | O_CREAT);
+		    open (startCommandStr, O_BINARY | O_RDWR | O_CREAT);
 		  startCommandStrSize -=
 		    listFileExtensionStrSize + argvSize[i] + infoLocStrSize;
 		  startCommandStr[startCommandStrSize] = 0;
@@ -2556,10 +2710,16 @@ main (int argc, char *argv[], char *envp[])
 		  previDS->prev = 0;
 		  currILFE = startILFE;
 		  curriDS = previDS;
-		  dirp =
-		    opendir (startCommandStr + checkIfSymbolicLinkStrSize);
+		  dirp = opendir (startCommandStr);
 		  newListFileSize =
 		    currILFE->fileLocSize + currILFE->directoryLocSize;
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
+		  *sargv = "test";
+		  sargv[1] = "-L";
+		  sargv[3] = 0;
 		  if (dirp)
 		    {
 		      curriDS->dirp = dirp;
@@ -2611,22 +2771,36 @@ main (int argc, char *argv[], char *envp[])
 						  &currILFE->fileLoc,
 						  &currILFE->fileLocSize,
 						  &startCommandStrSizeMax);
-				  appendInternalSrcConst (&startCommandStr,
-							  &startCommandStrSize,
-							  &checkIfSymbolicLinkEndStr,
-							  &checkIfSymbolicLinkEndStrSize,
-							  &startCommandStrSizeMax);
-				  startCommandStr[startCommandStrSize - 2] =
-				    '\"';
 				  startCommandStr[startCommandStrSize - 1] =
 				    0;
-				  if (system (startCommandStr))
+				  sargv[2] = startCommandStr;
+				  if (sargv[2]
+				      && !posix_spawnp (&spid, *sargv, NULL,
+							NULL, sargv, envp))
 				    {
-				      startCommandStr[startCommandStrSize -
-						      2] = 0;
-				      dirp =
-					opendir (startCommandStr +
-						 checkIfSymbolicLinkStrSize);
+				      if (waitid
+					  (P_PID, spid, &ssiginfo,
+					   WEXITED) != -1)
+					{
+					  if (ssiginfo.si_signo != SIGCHLD
+					      || ssiginfo.si_code !=
+					      CLD_EXITED)
+					    {
+					      ssiginfo.si_status = 1;
+					    }
+					}
+				      else
+					{
+					  ssiginfo.si_status = 1;
+					}
+				    }
+				  else
+				    {
+				      ssiginfo.si_status = 1;
+				    }
+				  if (ssiginfo.si_status)
+				    {
+				      dirp = opendir (startCommandStr);
 				      if (dirp)
 					{
 					  currILFE->isdirectory = 1;
@@ -2639,27 +2813,28 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->iDirectory->
-					    directoryLocSize =
+					  curriDS->
+					    iDirectory->directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *) malloc (curriDS->
-							     iDirectory->
-							     directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc,
+					    (char *)
+					    malloc
+					    (curriDS->iDirectory->directoryLocSize);
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc +
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->iDirectory->
-					    directoryLoc[curriDS->iDirectory->
-							 directoryLocSize -
-							 1] = '/';
+					  curriDS->
+					    iDirectory->directoryLoc[curriDS->
+								     iDirectory->directoryLocSize
+								     - 1] =
+					    '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
@@ -2669,8 +2844,6 @@ main (int argc, char *argv[], char *envp[])
 				    currILFE->directoryLocSize;
 				  startCommandStrSize -=
 				    currILFE->fileLocSize;
-				  startCommandStrSize -=
-				    checkIfSymbolicLinkEndStrSize;
 				}
 			    }
 			  closedir (dirp);
@@ -2741,9 +2914,7 @@ main (int argc, char *argv[], char *envp[])
 						  &checkIfSymbolicLinkEndStrSize,
 						  &newNameStrSizeMax);
 			  startCommandStr[startCommandStrSize - 2] = 0;
-			  if (!rename
-			      (startCommandStr + checkIfSymbolicLinkStrSize,
-			       newNameStr))
+			  if (!rename (startCommandStr, newNameStr))
 			    {
 			      currILFE->prevdirectory = 0;
 			    }
@@ -2896,9 +3067,7 @@ main (int argc, char *argv[], char *envp[])
 				    }
 				}
 			      rename (newNameStr, tmpNewNameStr);
-			      if (!rename
-				  (startCommandStr +
-				   checkIfSymbolicLinkStrSize, newNameStr))
+			      if (!rename (startCommandStr, newNameStr))
 				{
 				  if (remove (tmpNewNameStr))
 				    {
@@ -2935,9 +3104,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSize,
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize - 1] = 0;
-		  headFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR);
+		  headFile = open (startCommandStr, O_BINARY | O_RDWR);
 		  fstat (headFile, &st);
 		  headFileSize = st.st_size;
 		  headFileMemMap =
@@ -2974,9 +3141,7 @@ main (int argc, char *argv[], char *envp[])
 		    }
 		  munmap (headFileMemMap, headFileSize);
 		  close (headFile);
-		  headFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR);
+		  headFile = open (startCommandStr, O_BINARY | O_RDWR);
 		  fstat (headFile, &st);
 		  headFileSize = st.st_size;
 		  headFileMemMap =
@@ -2986,8 +3151,7 @@ main (int argc, char *argv[], char *envp[])
 		  for (j = 0; headFileMemMap[j] != '\n' && j != headFileSize;
 		       j++);
 		  startCommandStrSize =
-		    checkIfSymbolicLinkStrSize + installDirNameSize - 2 +
-		    varLocStrSize;
+		    installDirNameSize - 2 + varLocStrSize;
 		  appendInternalSrcConst (&startCommandStr,
 					  &startCommandStrSize, &aGLocStr,
 					  &aGLocStrSize,
@@ -3002,7 +3166,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  statusFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
+		    open (startCommandStr,
 			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  statusFileSize =
@@ -3903,15 +4067,11 @@ main (int argc, char *argv[], char *envp[])
 			  &packageFileMemMap, &st, &numberOfPackageLists,
 			  &gotonewline, &i, &packageList,
 			  &packageListNameSizes, &packageListNameSize,
-			  &execute);
+			  &execute, envp);
 	  startCommandStrSize = 1;
 	  startCommandStrSizeMax = 1;
 	  startCommandStr = (char *) malloc (startCommandStrSize);
 	  startCommandStrSize = 0;
-	  appendInternalSrcConst (&startCommandStr, &startCommandStrSize,
-				  &gitWorkingDirectoryCommandStr,
-				  &gitWorkingDirectoryCommandStrSize,
-				  &startCommandStrSizeMax);
 	  installDirNameSize--;
 	  appendInternal (&startCommandStr, &startCommandStrSize, &installDir,
 			  &installDirNameSize, &startCommandStrSizeMax);
@@ -3930,7 +4090,7 @@ main (int argc, char *argv[], char *envp[])
 				  &startCommandStrSizeMax);
 	  startCommandStr[startCommandStrSize - 1] = 0;
 	  statusFile =
-	    open (startCommandStr + gitWorkingDirectoryCommandStrSize,
+	    open (startCommandStr,
 		  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 		  S_IRUSR | S_IWUSR);
 	  fstat (statusFile, &st);
@@ -4031,7 +4191,7 @@ main (int argc, char *argv[], char *envp[])
 				      &startCommandStrSizeMax);
 	      startCommandStr[startCommandStrSize - 1] = 0;
 	      configFile =
-		open (startCommandStr + gitWorkingDirectoryCommandStrSize,
+		open (startCommandStr,
 		      O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 		      S_IRUSR | S_IWUSR);
 	      fstat (configFile, &st);
@@ -4075,6 +4235,10 @@ main (int argc, char *argv[], char *envp[])
 	      close (configFile);
 	      munmap (configFileMemMap, configFileSize);
 	    }
+	  *sargv = 0;
+	  sargv[1] = "-C";
+	  sargv[3] = "fetch";
+	  sargv[4] = 0;
 	  for (i = 0; i != numberOfPackageLists; i++)
 	    {
 	      if (packageListUsed[i])
@@ -4089,19 +4253,27 @@ main (int argc, char *argv[], char *envp[])
 					  packageNameStrs + j,
 					  packageNameStrSizes + j,
 					  &startCommandStrSizeMax);
-			  appendInternalSrcConst (&startCommandStr,
-						  &startCommandStrSize,
-						  &gitFetchCommandStr,
-						  &gitFetchCommandStrSize,
-						  &startCommandStrSizeMax);
 			  startCommandStrSize++;
 			  setupDstAppendInternal (&startCommandStr,
 						  &startCommandStrSize,
 						  &startCommandStrSizeMax);
 			  startCommandStr[startCommandStrSize - 1] = 0;
-			  system (startCommandStr);
+			  sargv[2] = startCommandStr;
+			  if (*sargv)
+			    {
+			      waitid (P_PID, spid, &ssiginfo, WEXITED);
+			    }
+			  if (sargv[2])
+			    {
+			      *sargv = "git";
+			    }
+			  if (*sargv
+			      && posix_spawnp (&spid, *sargv, NULL, NULL,
+					       sargv, envp) != 0)
+			    {
+			      *sargv = 0;
+			    }
 			  startCommandStrSize -= packageNameStrSizes[j];
-			  startCommandStrSize -= gitFetchCommandStrSize;
 			  startCommandStrSize--;
 			}
 		    }
@@ -4110,6 +4282,10 @@ main (int argc, char *argv[], char *envp[])
 		{
 		  printf ("Hit:1 %s main\n", packageList[i]);
 		}
+	    }
+	  if (*sargv)
+	    {
+	      waitid (P_PID, spid, &ssiginfo, WEXITED);
 	    }
 	}
       if ((!strcmp (argv[1], "upgrade") || !strcmp (argv[1], "dist-upgrade")))
@@ -4121,15 +4297,11 @@ main (int argc, char *argv[], char *envp[])
 			  &packageFileMemMap, &st, &numberOfPackageLists,
 			  &gotonewline, &i, &packageList,
 			  &packageListNameSizes, &packageListNameSize,
-			  &execute);
+			  &execute, envp);
 	  startCommandStrSize = 1;
 	  startCommandStrSizeMax = 1;
 	  startCommandStr = (char *) malloc (startCommandStrSize);
 	  startCommandStrSize = 0;
-	  appendInternalSrcConst (&startCommandStr, &startCommandStrSize,
-				  &gitWorkingDirectoryCommandStr,
-				  &gitWorkingDirectoryCommandStrSize,
-				  &startCommandStrSizeMax);
 	  installDirNameSize--;
 	  appendInternal (&startCommandStr, &startCommandStrSize, &installDir,
 			  &installDirNameSize, &startCommandStrSizeMax);
@@ -4148,7 +4320,7 @@ main (int argc, char *argv[], char *envp[])
 				  &startCommandStrSizeMax);
 	  startCommandStr[startCommandStrSize - 1] = 0;
 	  statusFile =
-	    open (startCommandStr + gitWorkingDirectoryCommandStrSize,
+	    open (startCommandStr,
 		  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 		  S_IRUSR | S_IWUSR);
 	  fstat (statusFile, &st);
@@ -4322,9 +4494,7 @@ main (int argc, char *argv[], char *envp[])
 	      setupDstAppendInternal (&startCommandStr, &startCommandStrSize,
 				      &startCommandStrSizeMax);
 	      startCommandStr[startCommandStrSize - 1] = 0;
-	      headFile =
-		open (startCommandStr + gitWorkingDirectoryCommandStrSize,
-		      O_BINARY | O_RDWR);
+	      headFile = open (startCommandStr, O_BINARY | O_RDWR);
 	      fstat (headFile, &st);
 	      headFileSize = st.st_size;
 	      headFileMemMap =
@@ -4364,7 +4534,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  configFile =
-		    open (startCommandStr + gitWorkingDirectoryCommandStrSize,
+		    open (startCommandStr,
 			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  startCommandStrSize -= configLocStrSize + 1;
@@ -4481,10 +4651,7 @@ main (int argc, char *argv[], char *envp[])
 					      &startCommandStrSize,
 					      &startCommandStrSizeMax);
 		      startCommandStr[startCommandStrSize - 1] = 0;
-		      fd =
-			open (startCommandStr +
-			      gitWorkingDirectoryCommandStrSize,
-			      O_BINARY | O_RDWR);
+		      fd = open (startCommandStr, O_BINARY | O_RDWR);
 		      if (fd != -1)
 			{
 			  munmap (headFileMemMap, headFileSize);
@@ -4521,10 +4688,7 @@ main (int argc, char *argv[], char *envp[])
 						  &startCommandStrSize,
 						  &startCommandStrSizeMax);
 			  startCommandStr[startCommandStrSize - 1] = 0;
-			  fd =
-			    open (startCommandStr +
-				  gitWorkingDirectoryCommandStrSize,
-				  O_BINARY | O_RDWR);
+			  fd = open (startCommandStr, O_BINARY | O_RDWR);
 			  startCommandStrSize -= packedRefsLocStrSize + 1;
 			  appendInternal (&startCommandStr,
 					  &startCommandStrSize, &commitHead,
@@ -4629,6 +4793,10 @@ main (int argc, char *argv[], char *envp[])
 	  fflush (stdout);
 	  if (getchar () != 'n')
 	    {
+	      *sargv = 0;
+	      sargv[1] = "-C";
+	      sargv[3] = "merge";
+	      sargv[4] = 0;
 	      for (i = 0; i != packageNameStrsNum; i++)
 		{
 		  appendInternal (&startCommandStr, &startCommandStrSize,
@@ -4649,7 +4817,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  configFile =
-		    open (startCommandStr + gitWorkingDirectoryCommandStrSize,
+		    open (startCommandStr,
 			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  fstat (configFile, &st);
@@ -4707,18 +4875,26 @@ main (int argc, char *argv[], char *envp[])
 				      packageNameStrSizes[i] -
 				      packageNameStrSize);
 			      printf (" [0 kB]\n");
-			      appendInternalSrcConst (&startCommandStr,
-						      &startCommandStrSize,
-						      &gitMergeCommandStr,
-						      &gitMergeCommandStrSize,
-						      &startCommandStrSizeMax);
 			      startCommandStrSize++;
 			      setupDstAppendInternal (&startCommandStr,
 						      &startCommandStrSize,
 						      &startCommandStrSizeMax);
 			      startCommandStr[startCommandStrSize - 1] = 0;
-			      system (startCommandStr);
-			      startCommandStrSize -= gitFetchCommandStrSize;
+			      sargv[2] = startCommandStr;
+			      if (*sargv)
+				{
+				  waitid (P_PID, spid, &ssiginfo, WEXITED);
+				}
+			      if (sargv[2])
+				{
+				  *sargv = "git";
+				}
+			      if (*sargv
+				  && posix_spawnp (&spid, *sargv, NULL, NULL,
+						   sargv, envp) != 0)
+				{
+				  *sargv = 0;
+				}
 			      startCommandStrSize--;
 			      j = numberOfPackageLists - 1;
 			    }
@@ -4734,6 +4910,7 @@ main (int argc, char *argv[], char *envp[])
 	      tmpNewNameStr = malloc (1);
 	      tmpNewNameStrSize = 0;
 	      tmpNewNameStrSizeMax = 1;
+	      sargv[3] = "checkout";
 	      for (i = 0; i != packageNameStrsNum; i++)
 		{
 		  packageNameStrSize = 1;
@@ -4742,6 +4919,10 @@ main (int argc, char *argv[], char *envp[])
 		  packageNameStrSize--;
 		  fieldPrecisionSpecifier = packageNameStrSize;
 		  packageNameStrSize = packageNameStrSizes[i];
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
 		  printf ("Preparing to unpack \"");
 		  while (packageNameStrSize > fieldPrecisionSpecifier)
 		    {
@@ -4757,9 +4938,6 @@ main (int argc, char *argv[], char *envp[])
 		  appendInternal (&startCommandStr, &startCommandStrSize,
 				  packageNameStrs + i,
 				  packageNameStrSizes + i,
-				  &startCommandStrSizeMax);
-		  appendInternal (&startCommandStr, &startCommandStrSize,
-				  &gitCommandStr, &gitCommandStrSize,
 				  &startCommandStrSizeMax);
 		  startCommandStrSize++;
 		  setupDstAppendInternal (&startCommandStr,
@@ -4784,9 +4962,18 @@ main (int argc, char *argv[], char *envp[])
 		  printf ("%.*s ...\n", fieldPrecisionSpecifier,
 			  packageNameStrs[i] + packageNameStrSizes[i] -
 			  packageNameStrSize);
+		  sargv[2] = startCommandStr;
 		  fflush (stdout);
-		  system (startCommandStr);
-		  startCommandStrSize -= gitCommandStrSize;
+		  if (sargv[2])
+		    {
+		      *sargv = "git";
+		    }
+		  if (*sargv
+		      && posix_spawnp (&spid, *sargv, NULL, NULL, sargv,
+				       envp) != 0)
+		    {
+		      *sargv = 0;
+		    }
 		  startCommandStrSize--;
 		  startCommandStrSize -= packageNameStrSizes[i];
 		}
@@ -4838,6 +5025,11 @@ main (int argc, char *argv[], char *envp[])
 		  packageNameStrSize--;
 		  fieldPrecisionSpecifier = packageNameStrSize;
 		  packageNameStrSize = packageNameStrSizes[i];
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
+		  *sargv = 0;
 		  printf ("Setting up ");
 		  while (packageNameStrSize > fieldPrecisionSpecifier)
 		    {
@@ -4885,32 +5077,9 @@ main (int argc, char *argv[], char *envp[])
 		  setupDstAppendInternal (&startCommandStr,
 					  &startCommandStrSize,
 					  &startCommandStrSizeMax);
+		  sargv[1] = "-c";
+		  sargv[3] = 0;
 		  startCommandStrSize = 0;
-		  startCommandStrSize += shellSpace;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] = '\"';
-		  appendInternal (&startCommandStr, &startCommandStrSize,
-				  &shellLocStr, &shellLocStrSize,
-				  &startCommandStrSizeMax);
-		  startCommandStrSize += shellSpace;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] =
-		    (startCommandStr[startCommandStrSize - 1] &
-		     (shellSpace - 1)) + ('\"' & (0 - shellSpace));
-		  appendInternalSrcConst (&startCommandStr,
-					  &startCommandStrSize,
-					  &shellOptionRunStr,
-					  &shellOptionRunStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStrSize++;
-		  setupDstAppendInternal (&startCommandStr,
-					  &startCommandStrSize,
-					  &startCommandStrSizeMax);
-		  startCommandStr[startCommandStrSize - 1] = '\"';
 		  appendInternalSrcConst (&startCommandStr,
 					  &startCommandStrSize, &cdStr,
 					  &cdStrSize,
@@ -5431,13 +5600,22 @@ main (int argc, char *argv[], char *envp[])
 			      setupDstAppendInternal (&startCommandStr,
 						      &startCommandStrSize,
 						      &startCommandStrSizeMax);
-			      startCommandStr[startCommandStrSize - 1] = '\"';
-			      startCommandStrSize++;
-			      setupDstAppendInternal (&startCommandStr,
-						      &startCommandStrSize,
-						      &startCommandStrSizeMax);
 			      startCommandStr[startCommandStrSize - 1] = 0;
-			      system (startCommandStr);
+			      sargv[2] = startCommandStr;
+			      if (*sargv)
+				{
+				  waitid (P_PID, spid, &ssiginfo, WEXITED);
+				}
+			      if (sargv[2])
+				{
+				  *sargv = shellLocStr;
+				}
+			      if (*sargv
+				  && posix_spawnp (&spid, *sargv, NULL, NULL,
+						   sargv, envp) != 0)
+				{
+				  *sargv = 0;
+				}
 			      startCommandStrSize = startCommandStrPos;
 			      execute = true;
 			      gotonewline = false;
@@ -5523,13 +5701,22 @@ main (int argc, char *argv[], char *envp[])
 			  setupDstAppendInternal (&startCommandStr,
 						  &startCommandStrSize,
 						  &startCommandStrSizeMax);
-			  startCommandStr[startCommandStrSize - 1] = '\"';
-			  startCommandStrSize++;
-			  setupDstAppendInternal (&startCommandStr,
-						  &startCommandStrSize,
-						  &startCommandStrSizeMax);
 			  startCommandStr[startCommandStrSize - 1] = 0;
-			  system (startCommandStr);
+			  sargv[2] = startCommandStr;
+			  if (*sargv)
+			    {
+			      waitid (P_PID, spid, &ssiginfo, WEXITED);
+			    }
+			  if (sargv[2])
+			    {
+			      *sargv = shellLocStr;
+			    }
+			  if (*sargv
+			      && posix_spawnp (&spid, *sargv, NULL, NULL,
+					       sargv, envp) != 0)
+			    {
+			      *sargv = 0;
+			    }
 			  startCommandStrSize = startCommandStrPos;
 			  execute = true;
 			  gotonewline = false;
@@ -5556,7 +5743,7 @@ main (int argc, char *argv[], char *envp[])
 			  newNameStrSize -=
 			    runshLocStrSize - runshDirLocStrSize + 1;
 			  newNameStr[newNameStrSize - 1] = 0;
-			  mkdim (newNameStr);
+			  mkdim (newNameStr, envp);
 			  newNameStr[newNameStrSize - 1] =
 			    runshLocStr[runshDirLocStrSize - 1];
 			  newNameStrSize -= runshDirLocStrSize;
@@ -5580,7 +5767,7 @@ main (int argc, char *argv[], char *envp[])
 						      &newNameStrSize,
 						      &newNameStrSizeMax);
 			      newNameStr[newNameStrSize - 1] = 0;
-			      mkdim (newNameStr);
+			      mkdim (newNameStr, envp);
 			      newNameStrSize--;
 			      appendInternalSrcConst (&newNameStr,
 						      &newNameStrSize,
@@ -6291,14 +6478,24 @@ main (int argc, char *argv[], char *envp[])
 							  &startCommandStrSize,
 							  &startCommandStrSizeMax);
 				  startCommandStr[startCommandStrSize - 1] =
-				    '\"';
-				  startCommandStrSize++;
-				  setupDstAppendInternal (&startCommandStr,
-							  &startCommandStrSize,
-							  &startCommandStrSizeMax);
-				  startCommandStr[startCommandStrSize - 1] =
 				    0;
-				  system (startCommandStr);
+				  sargv[2] = startCommandStr;
+				  if (*sargv)
+				    {
+				      waitid (P_PID, spid, &ssiginfo,
+					      WEXITED);
+				    }
+				  if (sargv[2])
+				    {
+				      *sargv = shellLocStr;
+				    }
+				  if (*sargv
+				      && posix_spawnp (&spid, *sargv, NULL,
+						       NULL, sargv,
+						       envp) != 0)
+				    {
+				      *sargv = 0;
+				    }
 				  startCommandStrSize = startCommandStrPos;
 				  execute = true;
 				  gotonewline = false;
@@ -6536,13 +6733,22 @@ main (int argc, char *argv[], char *envp[])
 			      setupDstAppendInternal (&startCommandStr,
 						      &startCommandStrSize,
 						      &startCommandStrSizeMax);
-			      startCommandStr[startCommandStrSize - 1] = '\"';
-			      startCommandStrSize++;
-			      setupDstAppendInternal (&startCommandStr,
-						      &startCommandStrSize,
-						      &startCommandStrSizeMax);
 			      startCommandStr[startCommandStrSize - 1] = 0;
-			      system (startCommandStr);
+			      sargv[2] = startCommandStr;
+			      if (*sargv)
+				{
+				  waitid (P_PID, spid, &ssiginfo, WEXITED);
+				}
+			      if (sargv[2])
+				{
+				  *sargv = shellLocStr;
+				}
+			      if (*sargv
+				  && posix_spawnp (&spid, *sargv, NULL, NULL,
+						   sargv, envp) != 0)
+				{
+				  *sargv = 0;
+				}
 			      startCommandStrSize = startCommandStrPos;
 			      execute = true;
 			      gotonewline = false;
@@ -6550,11 +6756,6 @@ main (int argc, char *argv[], char *envp[])
 			}
 		    }
 		  startCommandStrSize = 0;
-		  appendInternalSrcConst (&startCommandStr,
-					  &startCommandStrSize,
-					  &checkIfSymbolicLinkStr,
-					  &checkIfSymbolicLinkStrSize,
-					  &startCommandStrSizeMax);
 		  installDirNameSize--;
 		  appendInternal (&startCommandStr, &startCommandStrSize,
 				  &installDir, &installDirNameSize,
@@ -6577,7 +6778,7 @@ main (int argc, char *argv[], char *envp[])
 					  &infoLocStrSize,
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize] = 0;
-		  mkdim (startCommandStr + checkIfSymbolicLinkStrSize);
+		  mkdim (startCommandStr, envp);
 		  appendInternal (&startCommandStr, &startCommandStrSize,
 				  &packageNameStrs[i],
 				  &packageNameStrSizes[i],
@@ -6589,8 +6790,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize] = 0;
 		  newListFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR | O_CREAT);
+		    open (startCommandStr, O_BINARY | O_RDWR | O_CREAT);
 		  startCommandStrSize -=
 		    listFileExtensionStrSize + packageNameStrSizes[i] +
 		    infoLocStrSize;
@@ -6618,10 +6818,16 @@ main (int argc, char *argv[], char *envp[])
 		  previDS->prev = 0;
 		  currILFE = startILFE;
 		  curriDS = previDS;
-		  dirp =
-		    opendir (startCommandStr + checkIfSymbolicLinkStrSize);
+		  dirp = opendir (startCommandStr);
 		  newListFileSize =
 		    currILFE->fileLocSize + currILFE->directoryLocSize;
+		  if (*sargv)
+		    {
+		      waitid (P_PID, spid, &ssiginfo, WEXITED);
+		    }
+		  *sargv = "test";
+		  sargv[1] = "-L";
+		  sargv[3] = 0;
 		  if (dirp)
 		    {
 		      curriDS->dirp = dirp;
@@ -6673,22 +6879,36 @@ main (int argc, char *argv[], char *envp[])
 						  &currILFE->fileLoc,
 						  &currILFE->fileLocSize,
 						  &startCommandStrSizeMax);
-				  appendInternalSrcConst (&startCommandStr,
-							  &startCommandStrSize,
-							  &checkIfSymbolicLinkEndStr,
-							  &checkIfSymbolicLinkEndStrSize,
-							  &startCommandStrSizeMax);
-				  startCommandStr[startCommandStrSize - 2] =
-				    '\"';
 				  startCommandStr[startCommandStrSize - 1] =
 				    0;
-				  if (system (startCommandStr))
+				  sargv[2] = startCommandStr;
+				  if (sargv[2]
+				      && !posix_spawnp (&spid, *sargv, NULL,
+							NULL, sargv, envp))
 				    {
-				      startCommandStr[startCommandStrSize -
-						      2] = 0;
-				      dirp =
-					opendir (startCommandStr +
-						 checkIfSymbolicLinkStrSize);
+				      if (waitid
+					  (P_PID, spid, &ssiginfo,
+					   WEXITED) != -1)
+					{
+					  if (ssiginfo.si_signo != SIGCHLD
+					      || ssiginfo.si_code !=
+					      CLD_EXITED)
+					    {
+					      ssiginfo.si_status = 1;
+					    }
+					}
+				      else
+					{
+					  ssiginfo.si_status = 1;
+					}
+				    }
+				  else
+				    {
+				      ssiginfo.si_status = 1;
+				    }
+				  if (ssiginfo.si_status)
+				    {
+				      dirp = opendir (startCommandStr);
 				      if (dirp)
 					{
 					  currILFE->isdirectory = 1;
@@ -6701,27 +6921,28 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->iDirectory->
-					    directoryLocSize =
+					  curriDS->
+					    iDirectory->directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *) malloc (curriDS->
-							     iDirectory->
-							     directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc,
+					    (char *)
+					    malloc
+					    (curriDS->iDirectory->directoryLocSize);
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc +
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->iDirectory->
-					    directoryLoc[curriDS->iDirectory->
-							 directoryLocSize -
-							 1] = '/';
+					  curriDS->
+					    iDirectory->directoryLoc[curriDS->
+								     iDirectory->directoryLocSize
+								     - 1] =
+					    '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
@@ -6731,8 +6952,6 @@ main (int argc, char *argv[], char *envp[])
 				    currILFE->directoryLocSize;
 				  startCommandStrSize -=
 				    currILFE->fileLocSize;
-				  startCommandStrSize -=
-				    checkIfSymbolicLinkEndStrSize;
 				}
 			    }
 			  closedir (dirp);
@@ -6803,9 +7022,7 @@ main (int argc, char *argv[], char *envp[])
 						  &checkIfSymbolicLinkEndStrSize,
 						  &newNameStrSizeMax);
 			  startCommandStr[startCommandStrSize - 2] = 0;
-			  if (!rename
-			      (startCommandStr + checkIfSymbolicLinkStrSize,
-			       newNameStr))
+			  if (!rename (startCommandStr, newNameStr))
 			    {
 			      currILFE->prevdirectory = 0;
 			    }
@@ -6958,9 +7175,7 @@ main (int argc, char *argv[], char *envp[])
 				    }
 				}
 			      rename (newNameStr, tmpNewNameStr);
-			      if (!rename
-				  (startCommandStr +
-				   checkIfSymbolicLinkStrSize, newNameStr))
+			      if (!rename (startCommandStr, newNameStr))
 				{
 				  if (remove (tmpNewNameStr))
 				    {
@@ -6997,9 +7212,7 @@ main (int argc, char *argv[], char *envp[])
 					  &startCommandStrSize,
 					  &startCommandStrSizeMax);
 		  startCommandStr[startCommandStrSize - 1] = 0;
-		  headFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR);
+		  headFile = open (startCommandStr, O_BINARY | O_RDWR);
 		  fstat (headFile, &st);
 		  headFileSize = st.st_size;
 		  headFileMemMap =
@@ -7036,9 +7249,7 @@ main (int argc, char *argv[], char *envp[])
 		    }
 		  munmap (headFileMemMap, headFileSize);
 		  close (headFile);
-		  headFile =
-		    open (startCommandStr + checkIfSymbolicLinkStrSize,
-			  O_BINARY | O_RDWR);
+		  headFile = open (startCommandStr, O_BINARY | O_RDWR);
 		  fstat (headFile, &st);
 		  headFileSize = st.st_size;
 		  headFileMemMap =
