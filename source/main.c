@@ -2813,28 +2813,27 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->
-					    iDirectory->directoryLocSize =
+					  curriDS->iDirectory->
+					    directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *)
-					    malloc
-					    (curriDS->iDirectory->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc,
+					    (char *) malloc (curriDS->
+							     iDirectory->
+							     directoryLocSize);
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc +
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->
-					    iDirectory->directoryLoc[curriDS->
-								     iDirectory->directoryLocSize
-								     - 1] =
-					    '/';
+					  curriDS->iDirectory->
+					    directoryLoc[curriDS->iDirectory->
+							 directoryLocSize -
+							 1] = '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
@@ -4091,7 +4090,7 @@ main (int argc, char *argv[], char *envp[])
 	  startCommandStr[startCommandStrSize - 1] = 0;
 	  statusFile =
 	    open (startCommandStr,
-		  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+		  O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 		  S_IRUSR | S_IWUSR);
 	  fstat (statusFile, &st);
 	  statusFileSize = st.st_size;
@@ -4192,7 +4191,7 @@ main (int argc, char *argv[], char *envp[])
 	      startCommandStr[startCommandStrSize - 1] = 0;
 	      configFile =
 		open (startCommandStr,
-		      O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+		      O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 		      S_IRUSR | S_IWUSR);
 	      fstat (configFile, &st);
 	      configFileSize = st.st_size;
@@ -4321,8 +4320,7 @@ main (int argc, char *argv[], char *envp[])
 	  startCommandStr[startCommandStrSize - 1] = 0;
 	  statusFile =
 	    open (startCommandStr,
-		  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
-		  S_IRUSR | S_IWUSR);
+		  O_BINARY | O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
 	  fstat (statusFile, &st);
 	  statusFileSize = st.st_size;
 	  statusFileMemAlloc =
@@ -4535,7 +4533,7 @@ main (int argc, char *argv[], char *envp[])
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  configFile =
 		    open (startCommandStr,
-			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+			  O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  startCommandStrSize -= configLocStrSize + 1;
 		  appendInternalSrcConst (&startCommandStr,
@@ -4818,7 +4816,7 @@ main (int argc, char *argv[], char *envp[])
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  configFile =
 		    open (startCommandStr,
-			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+			  O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  fstat (configFile, &st);
 		  configFileSize = st.st_size;
@@ -6921,28 +6919,27 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->
-					    iDirectory->directoryLocSize =
+					  curriDS->iDirectory->
+					    directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *)
-					    malloc
-					    (curriDS->iDirectory->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc,
+					    (char *) malloc (curriDS->
+							     iDirectory->
+							     directoryLocSize);
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc +
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->
-					    iDirectory->directoryLoc[curriDS->
-								     iDirectory->directoryLocSize
-								     - 1] =
-					    '/';
+					  curriDS->iDirectory->
+					    directoryLoc[curriDS->iDirectory->
+							 directoryLocSize -
+							 1] = '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
