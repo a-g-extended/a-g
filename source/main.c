@@ -2813,27 +2813,28 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->iDirectory->
-					    directoryLocSize =
+					  curriDS->
+					    iDirectory->directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *) malloc (curriDS->
-							     iDirectory->
-							     directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc,
+					    (char *)
+					    malloc
+					    (curriDS->iDirectory->directoryLocSize);
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc +
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->iDirectory->
-					    directoryLoc[curriDS->iDirectory->
-							 directoryLocSize -
-							 1] = '/';
+					  curriDS->
+					    iDirectory->directoryLoc[curriDS->
+								     iDirectory->directoryLocSize
+								     - 1] =
+					    '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
@@ -3486,8 +3487,59 @@ main (int argc, char *argv[], char *envp[])
 						      &packageListPathStrSizeMax);
 			      packageListPathStr[packageListPathStrSize - 1] =
 				0;
+			      dirp = opendir (packageListPathStr);
+			      if (dirp)
+				{
+				  closedir (dirp);
+				}
+			      else
+				{
+				  chmod (packageListPathStr, S_IWUSR);
+				  startILFE[j].isdone =
+				    1 - (remove (packageListPathStr) & 1);
+				}
+			    }
+			}
+		      for (j = 0; j != numILFE; j++)
+			{
+			  if (!startILFE[j].isdone)
+			    {
+			      packageListPathStrSize = installDirNameSize;
+			      appendInternal (&packageListPathStr,
+					      &packageListPathStrSize,
+					      &startILFE[j].fileLoc,
+					      &startILFE[j].fileLocSize,
+					      &packageListPathStrSizeMax);
+			      packageListPathStrSize++;
+			      setupDstAppendInternal (&packageListPathStr,
+						      &packageListPathStrSize,
+						      &packageListPathStrSizeMax);
+			      packageListPathStr[packageListPathStrSize - 1] =
+				0;
 			      startILFE[j].isdone =
-				1 - (remove (packageListPathStr) & 1);
+				1 - (rmdir (packageListPathStr) & 1);
+			    }
+			}
+		      for (j = 0; j != numILFE; j++)
+			{
+			  if (!startILFE[numILFE - j - 1].isdone)
+			    {
+			      packageListPathStrSize = installDirNameSize;
+			      appendInternal (&packageListPathStr,
+					      &packageListPathStrSize,
+					      &startILFE[numILFE - j -
+							 1].fileLoc,
+					      &startILFE[numILFE - j -
+							 1].fileLocSize,
+					      &packageListPathStrSizeMax);
+			      packageListPathStrSize++;
+			      setupDstAppendInternal (&packageListPathStr,
+						      &packageListPathStrSize,
+						      &packageListPathStrSizeMax);
+			      packageListPathStr[packageListPathStrSize - 1] =
+				0;
+			      startILFE[numILFE - j - 1].isdone =
+				1 - (rmdir (packageListPathStr) & 1);
 			    }
 			}
 		      for (j = 0; j != numILFE; j++)
@@ -3511,12 +3563,12 @@ main (int argc, char *argv[], char *envp[])
 				{
 				  closedir (dirp);
 				}
-			      else if (errno == ENOTDIR)
+			      else
 				{
 				  chmod (packageListPathStr, S_IWUSR);
+				  startILFE[j].isdone =
+				    1 - (remove (packageListPathStr) & 1);
 				}
-			      startILFE[j].isdone =
-				1 - (remove (packageListPathStr) & 1);
 			    }
 			}
 		      for (j = 0; j != numILFE; j++)
@@ -6919,27 +6971,28 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->iDirectory->
-					    directoryLocSize =
+					  curriDS->
+					    iDirectory->directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *) malloc (curriDS->
-							     iDirectory->
-							     directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc,
+					    (char *)
+					    malloc
+					    (curriDS->iDirectory->directoryLocSize);
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->iDirectory->
-						  directoryLoc +
+					  memcpy (curriDS->
+						  iDirectory->directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->iDirectory->
-					    directoryLoc[curriDS->iDirectory->
-							 directoryLocSize -
-							 1] = '/';
+					  curriDS->
+					    iDirectory->directoryLoc[curriDS->
+								     iDirectory->directoryLocSize
+								     - 1] =
+					    '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
