@@ -2813,28 +2813,27 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->
-					    iDirectory->directoryLocSize =
+					  curriDS->iDirectory->
+					    directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *)
-					    malloc
-					    (curriDS->iDirectory->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc,
+					    (char *) malloc (curriDS->
+							     iDirectory->
+							     directoryLocSize);
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc +
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->
-					    iDirectory->directoryLoc[curriDS->
-								     iDirectory->directoryLocSize
-								     - 1] =
-					    '/';
+					  curriDS->iDirectory->
+					    directoryLoc[curriDS->iDirectory->
+							 directoryLocSize -
+							 1] = '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
@@ -3167,45 +3166,175 @@ main (int argc, char *argv[], char *envp[])
 		  startCommandStr[startCommandStrSize - 1] = 0;
 		  statusFile =
 		    open (startCommandStr,
-			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+			  O_BINARY | O_RDWR | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
-		  statusFileSize =
-		    1 + packageEntryStrSize + argvSize[i] + 1 +
-		    statusEntryStrSize + statusEntryInstalledStrSize + 1 +
-		    commitHashEntryStrSize + j + 1;
-		  statusFileMemAlloc = (char *) malloc (statusFileSize);
+		  fstat (statusFile, &st);
+		  statusFileSize = st.st_size;
+		  statusFileMemAlloc =
+		    mmap (0, statusFileSize, PROT_READ | PROT_WRITE,
+			  MAP_SHARED, statusFile, 0);
+		  madvise (statusFileMemAlloc, statusFileSize, MADV_WILLNEED);
 		  statusFileMemAllocPos = 0;
-		  statusFileMemAlloc[statusFileMemAllocPos] = '\n';
-		  statusFileMemAllocPos++;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos,
-			  packageEntryStr, packageEntryStrSize);
-		  statusFileMemAllocPos += packageEntryStrSize;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos, argv[i],
-			  argvSize[i]);
-		  statusFileMemAllocPos += argvSize[i];
-		  statusFileMemAlloc[statusFileMemAllocPos] = '\n';
-		  statusFileMemAllocPos++;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos,
-			  statusEntryStr, statusEntryStrSize);
-		  statusFileMemAllocPos += statusEntryStrSize;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos,
-			  statusEntryInstalledStr,
-			  statusEntryInstalledStrSize);
-		  statusFileMemAllocPos += statusEntryInstalledStrSize;
-		  statusFileMemAlloc[statusFileMemAllocPos] = '\n';
-		  statusFileMemAllocPos++;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos,
-			  commitHashEntryStr, commitHashEntryStrSize);
-		  statusFileMemAllocPos += commitHashEntryStrSize;
-		  memcpy (statusFileMemAlloc + statusFileMemAllocPos,
-			  headFileMemMap, j);
-		  statusFileMemAllocPos += j;
-		  statusFileMemAlloc[statusFileMemAllocPos] = '\n';
-		  statusFileMemAllocPos++;
-		  write (statusFile, statusFileMemAlloc,
-			 statusFileMemAllocPos);
+		  gotonewline = false;
+		  creatednew = false;
+		  for (k = 0; k != statusFileSize; k++)
+		    {
+		      if (gotonewline)
+			{
+			  if (creatednew)
+			    {
+			      if (k - statusFileMemAllocPos == argvSize[i])
+				{
+				  if (statusFileMemAlloc[k] != '\n')
+				    {
+				      creatednew = false;
+				      k = statusFileSize - 1;
+				    }
+				}
+			      else
+				{
+				  creatednew =
+				    argv[i][k - statusFileMemAllocPos] ==
+				    statusFileMemAlloc[k];
+				}
+			    }
+			}
+		      else
+			{
+			  if (creatednew
+			      && k - statusFileMemAllocPos - 1 == argvSize[i])
+			    {
+			      k = statusFileSize - 1;
+			    }
+			  else
+			    {
+			      creatednew = false;
+			      if (!strncmp
+				  (statusFileMemAlloc + k, "Package: ", 9))
+				{
+				  k += 9;
+				  statusFileMemAllocPos = k;
+				  if (k - statusFileMemAllocPos ==
+				      argvSize[i])
+				    {
+				      k = statusFileSize - 1;
+				    }
+				  else
+				    {
+				      creatednew =
+					argv[i][k - statusFileMemAllocPos] ==
+					statusFileMemAlloc[k];
+				    }
+				}
+			    }
+			}
+		      gotonewline = statusFileMemAlloc[k] != '\n';
+		    }
+		  if (creatednew)
+		    {
+		      statusFileMemAllocPos += argvSize[i] + 1;
+		      creatednew = false;
+		      gotonewline = false;
+		      for (k = statusFileMemAllocPos; k != statusFileSize;
+			   k++)
+			{
+			  if (!gotonewline && statusFileMemAlloc[k] == '\n')
+			    {
+			      break;
+			    }
+			  gotonewline = statusFileMemAlloc[k] != '\n';
+			  if (gotonewline)
+			    {
+			      if (creatednew)
+				{
+				  if (k - statusFileMemAllocPos == j)
+				    {
+				      k = statusFileSize - 1;
+				    }
+				  else
+				    {
+				      statusFileMemAlloc[k] =
+					headFileMemMap[k -
+						       statusFileMemAllocPos];
+				    }
+				}
+			    }
+			  else
+			    {
+			      if (creatednew
+				  && k - statusFileMemAllocPos - 1 == j)
+				{
+				  k = statusFileSize - 1;
+				}
+			      else
+				{
+				  creatednew = false;
+				  if (statusFileMemAlloc[k - 1] != '\n'
+				      && !strncmp (statusFileMemAlloc + k,
+						   "\nCommitHash: ", 13))
+				    {
+				      k += 13;
+				      creatednew =
+					k - statusFileMemAllocPos != j;
+				      statusFileMemAllocPos = k;
+				      if (k - statusFileMemAllocPos == j)
+					{
+					  k = statusFileSize - 1;
+					}
+				      else
+					{
+					  creatednew = true;
+					  statusFileMemAlloc[k] =
+					    headFileMemMap[k -
+							   statusFileMemAllocPos];
+					}
+				    }
+				}
+			    }
+			}
+		      creatednew = true;
+		    }
+		  munmap (statusFileMemAlloc, statusFileSize);
+		  if (!creatednew)
+		    {
+		      statusFileSize =
+			1 + packageEntryStrSize + argvSize[i] + 1 +
+			statusEntryStrSize + statusEntryInstalledStrSize + 1 +
+			commitHashEntryStrSize + j + 1;
+		      statusFileMemAlloc = (char *) malloc (statusFileSize);
+		      statusFileMemAllocPos = 0;
+		      statusFileMemAlloc[statusFileMemAllocPos] = '\n';
+		      statusFileMemAllocPos++;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      packageEntryStr, packageEntryStrSize);
+		      statusFileMemAllocPos += packageEntryStrSize;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      argv[i], argvSize[i]);
+		      statusFileMemAllocPos += argvSize[i];
+		      statusFileMemAlloc[statusFileMemAllocPos] = '\n';
+		      statusFileMemAllocPos++;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      statusEntryStr, statusEntryStrSize);
+		      statusFileMemAllocPos += statusEntryStrSize;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      statusEntryInstalledStr,
+			      statusEntryInstalledStrSize);
+		      statusFileMemAllocPos += statusEntryInstalledStrSize;
+		      statusFileMemAlloc[statusFileMemAllocPos] = '\n';
+		      statusFileMemAllocPos++;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      commitHashEntryStr, commitHashEntryStrSize);
+		      statusFileMemAllocPos += commitHashEntryStrSize;
+		      memcpy (statusFileMemAlloc + statusFileMemAllocPos,
+			      headFileMemMap, j);
+		      statusFileMemAllocPos += j;
+		      statusFileMemAlloc[statusFileMemAllocPos] = '\n';
+		      statusFileMemAllocPos++;
+		      write (statusFile, statusFileMemAlloc,
+			     statusFileMemAllocPos);
+		      free (statusFileMemAlloc);
+		    }
 		  close (statusFile);
-		  free (statusFileMemAlloc);
 		  munmap (headFileMemMap, headFileSize);
 		  close (headFile);
 		}
@@ -6971,28 +7100,27 @@ main (int argc, char *argv[], char *envp[])
 					    prevdirectory;
 					  curriDS->iDirectory =
 					    currILFE->next;
-					  curriDS->
-					    iDirectory->directoryLocSize =
+					  curriDS->iDirectory->
+					    directoryLocSize =
 					    currILFE->directoryLocSize +
 					    currILFE->fileLocSize;
 					  curriDS->iDirectory->directoryLoc =
-					    (char *)
-					    malloc
-					    (curriDS->iDirectory->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc,
+					    (char *) malloc (curriDS->
+							     iDirectory->
+							     directoryLocSize);
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc,
 						  currILFE->directoryLoc,
 						  currILFE->directoryLocSize);
-					  memcpy (curriDS->
-						  iDirectory->directoryLoc +
+					  memcpy (curriDS->iDirectory->
+						  directoryLoc +
 						  currILFE->directoryLocSize,
 						  currILFE->fileLoc,
 						  currILFE->fileLocSize);
-					  curriDS->
-					    iDirectory->directoryLoc[curriDS->
-								     iDirectory->directoryLocSize
-								     - 1] =
-					    '/';
+					  curriDS->iDirectory->
+					    directoryLoc[curriDS->iDirectory->
+							 directoryLocSize -
+							 1] = '/';
 					  curriDS->dirp = dirp;
 					  curriDS->prev = previDS;
 					}
