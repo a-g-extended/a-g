@@ -17,7 +17,7 @@
 #define O_BINARY 0
 #endif
 #ifndef RUNSHSTR
-#define RUNSHSTR "mkdir build\nmkdir install1\ncd build\n../configure --prefix='$(realpath ../install1)'\nmake\nmake install"
+#define RUNSHSTR "mkdir build\nmkdir install1\ncd build\n../configure --prefix=\"$(realpath ../install1)\"\nmake\nmake install"
 #endif
 #ifndef SOURCESLISTSTR
 #define SOURCESLISTSTR "git https://github.com/CoderRC"
