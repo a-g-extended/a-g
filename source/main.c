@@ -1000,7 +1000,7 @@ main (int argc, char *argv[], char *envp[])
 		  startCommandStrPos = startCommandStrSize;
 		  runFile =
 		    open (newNameStr,
-			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+			  O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  runFileMemAllocPos = 0;
 		  runFileLine = 0;
@@ -5279,7 +5279,7 @@ main (int argc, char *argv[], char *envp[])
 		  startCommandStrPos = startCommandStrSize;
 		  runFile =
 		    open (newNameStr,
-			  O_BINARY | O_WRONLY | O_CREAT | O_APPEND,
+			  O_BINARY | O_RDONLY | O_CREAT | O_APPEND,
 			  S_IRUSR | S_IWUSR);
 		  runFileMemAllocPos = 0;
 		  runFileLine = 0;
