@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <string.h>
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
