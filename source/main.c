@@ -689,6 +689,7 @@ main (int argc, char *argv[], char *envp[])
       configStrsDirLen[i] = strlen (configStrsDir[i]);
     }
   statusFileRequestSorted = false;
+  installDirNameSize = 0;
   dlInfo.dli_fname = 0;
   dlInfo.dli_fbase = 0;
   dlInfo.dli_sname = 0;
