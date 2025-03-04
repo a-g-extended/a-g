@@ -21,7 +21,7 @@
 #define RUNSHSTR "mkdir build\nmkdir install1\ncd build\n../configure --prefix=\"$(realpath ../install1)\"\nmake\nmake install"
 #endif
 #ifndef SOURCESLISTSTR
-#define SOURCESLISTSTR "git https://github.com/CoderRC"
+#define SOURCESLISTSTR "git https://:@github.com/CoderRC"
 #endif
 
 static inline void
